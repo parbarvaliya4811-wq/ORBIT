@@ -9,3 +9,8 @@ ORBIT (DEEP SPACE PROTOCOL)
 
 ​Auto-Memory: It saves exactly which sector you’re on. You can close the tab and come back weeks later, and you're still in the same spot.
 ​Kinetic Polish: The neon trails and screen shakes when you hit a hazard make it feel like a finished product, not just a school project.
+
+
+I KNOW MY README IS BORING BUT I'M COOKED RIGHT NOW 
+PLZ
+SORRY
