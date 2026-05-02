@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ORBIT // DEEP SPACE PROTOCOL</title>
+    <style>
+        :root { --neon: #22d3ee; --hazard: #ef4444; --accent: #fbbf24; }
+        body { margin: 0; background: #020617; color: #f8fafc; font-family: 'Inter', system-ui, sans-serif; overflow: hidden; touch-action: none; }
+        
+        #game-ui { position: absolute; inset: 25px; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; z-index: 10; }
+        .header { display: flex; justify-content: space-between; align-items: flex-start; }
+        
+        .level-card { border-left: 4px solid var(--neon); padding-left: 15px; background: rgba(34, 211, 238, 0.05); padding-right: 20px; }
+        .level-label { font-size: 10px; text-transform: uppercase; letter-spacing: 2px; opacity: 0.6; }
+        .level-value { font-size: 38px; font-weight: 900; color: var(--neon); line-height: 1; }
+        
+        .wells-container { text-align: right; }
+        .wells-dots { font-size: 24px; color: var(--accent); text-shadow: 0 0 10px var(--accent); }
+        
+        #system-msg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; opacity: 0; transition: 0.3s; pointer-events: none; text-align: center; font-size: 1.2rem; }
+        
+        .btn-reset { pointer-events: auto; background: none; border: 1px solid rgba(255,255,255,0.1); color: #fff; font-size: 9px; padding: 5px 10px; cursor: pointer; border-radius: 3px; margin-top: 8px; opacity: 0.5; transition: 0.2s; }
+        .btn-reset:hover { opacity: 1; border-color: var(--hazard); color: var(--hazard); }
+        
+        canvas { display: block; cursor: crosshair; }
+    </style>
+</head>
+<body>
+
+    <div id="game-ui">
+        <div class="header">
+            <div class="level-card">
+                <div class="level-label">Sector Interface</div>
+                <div class="level-value" id="lvl-display">01</div>
+                <button class="btn-reset" onclick="hardReset()">FACTORY RESET</button>
+            </div>
+            <div class="wells-container">
+                <div class="level-label">Gravity Wells</div>
+                <div class="wells-dots" id="well-display">● ● ●</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="system-msg">Initializing Sector...</div>
+    <canvas id="canvas"></canvas>
+
+<script>
+/**
+ * ORBIT ENGINE v3.0 - STABILIZED FINAL
+ * Vector Physics // Procedural Level Scaling // State Persistence
+ */
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const lvlEl = document.getElementById('lvl-display');
+const wellEl = document.getElementById('well-display');
+const msgEl = document.getElementById('system-msg');
+
+// Physics Constants
+const G = 0.72;
+const DRAG = 0.9994;
+let currentLevel = parseInt(localStorage.getItem('orbit_final_sector')) || 1;
+let wellsLeft = 3;
+let planets = [];
+let hazards = [];
+let running = false;
+
+let core = { x: 0, y: 0, vx: 0, vy: 0, trail: [] };
+let goal = { x: 0, y: 0, r: 25 };
+
+// Deterministic RNG
+const seed = (s) => () => {
+    s = Math.sin(s) * 10000;
+    return s - Math.floor(s);
+};
+
+function initLevel(num) {
+    const random = seed(num + 888);
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    
+    // Persistence
+    localStorage.setItem('orbit_final_sector', num);
+    lvlEl.innerText = num.toString().padStart(2, '0');
+    
+    // Difficulty Scaling
+    wellsLeft = Math.max(1, 4 - Math.floor(num / 30));
+    updateUI();
+    
+    // Reset Core
+    core.x = 100;
+    core.y = canvas.height / 2;
+    core.vx = 2.8 + (num * 0.015);
+    core.vy = 0;
+    core.trail = [];
+    
+    // Place Goal
+    goal.x = canvas.width - 150;
+    goal.y = (canvas.height * 0.15) + (random() * (canvas.height * 0.7));
+    
+    // Generate Hazards
+    hazards = [];
+    const count = Math.min(18, Math.floor(num / 6) + 1);
+    for(let i=0; i<count; i++) {
+        hazards.push({
+            x: 350 + (random() * (canvas.width - 650)),
+            y: random() * canvas.height,
+            r: 12 + (random() * 25),
+            m: 550
+        });
+    }
+    
+    planets = [];
+    running = true;
+    notify(`Sector ${num} Sync Complete`);
+}
+
+function update() {
+    if (!running) return;
+
+    // Apply Gravitational Forces
+    const attractors = [...planets, ...hazards];
+    attractors.forEach(p => {
+        const dx = p.x - core.x;
+        const dy = p.y - core.y;
+        const d2 = dx*dx + dy*dy;
+        const d = Math.sqrt(d2);
+
+        // Impact Detection
+        if (d < p.r + 6) fail("Core Impact Detected");
+
+        const force = (G * p.m) / Math.max(d2, 450);
+        core.vx += (dx / d) * force;
+        core.vy += (dy / d) * force;
+    });
+
+    // Momentum Update
+    core.vx *= DRAG;
+    core.vy *= DRAG;
+    core.x += core.vx;
+    core.y += core.vy;
+
+    // Trail Matrix
+    core.trail.push({x: core.x, y: core.y});
+    if (core.trail.length > 80) core.trail.shift();
+
+    // Victory Check
+    const distToGoal = Math.hypot(goal.x - core.x, goal.y - core.y);
+    if (distToGoal < goal.r + 8) win();
+
+    // Boundary Logic
+    if (core.x < -100 || core.x > canvas.width + 100 || core.y < -100 || core.y > canvas.height + 100) {
+        fail("Trajectory Terminated");
+    }
+}
+
+function draw() {
+    // Backdrop
+    ctx.fillStyle = '#020617';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Visual Grid
+    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+    ctx.lineWidth = 1;
+    for(let i=0; i<canvas.width; i+=100) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i, canvas.height); ctx.stroke(); }
+    for(let i=0; i<canvas.height; i+=100) { ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(canvas.width, i); ctx.stroke(); }
+
+    // Render Objects
+    hazards.forEach(p => renderEntity(p.x, p.y, p.r, '#ef4444', 15));
+    planets.forEach(p => renderEntity(p.x, p.y, p.r, '#22d3ee', 25));
+
+    // Render Goal
+    ctx.beginPath();
+    ctx.arc(goal.x, goal.y, goal.r + Math.sin(Date.now()*0.005)*5, 0, Math.PI*2);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([8, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Render Core & Path
+    if (core.trail.length > 1) {
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(251, 191, 36, 0.3)';
+        ctx.lineWidth = 2;
+        core.trail.forEach(pt => ctx.lineTo(pt.x, pt.y));
+        ctx.stroke();
+    }
+    renderEntity(core.x, core.y, 6, '#ffffff', 20);
+
+    update();
+    requestAnimationFrame(draw);
+}
+
+function renderEntity(x, y, r, col, glow) {
+    ctx.shadowBlur = glow;
+    ctx.shadowColor = col;
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI*2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+}
+
+function win() {
+    running = false;
+    currentLevel++;
+    notify(currentLevel > 100 ? "System Mastered" : "Orbital Stabilized");
+    setTimeout(() => initLevel(currentLevel > 100 ? 1 : currentLevel), 1200);
+}
+
+function fail(m) {
+    running = false;
+    notify(m);
+    setTimeout(() => initLevel(currentLevel), 1200);
+}
+
+function notify(m) {
+    msgEl.innerText = m;
+    msgEl.style.opacity = 1;
+    setTimeout(() => msgEl.style.opacity = 0, 1000);
+}
+
+function updateUI() {
+    wellEl.innerHTML = '● '.repeat(wellsLeft);
+}
+
+function hardReset() {
+    if(confirm("Erase all orbital data and return to Sector 01?")) {
+        localStorage.removeItem('orbit_final_sector');
+        location.reload();
+    }
+}
+
+// Unified Interaction
+const handleInput = (e) => {
+    if (!running || wellsLeft <= 0) return;
+    const t = e.touches ? e.touches[0] : e;
+    planets.push({ x: t.clientX, y: t.clientY, r: 22, m: 750 });
+    wellsLeft--;
+    updateUI();
+};
+
+window.addEventListener('touchstart', (e) => { e.preventDefault(); handleInput(e); }, {passive: false});
+window.addEventListener('mousedown', handleInput);
+window.addEventListener('resize', () => initLevel(currentLevel));
+
+// Boot
+initLevel(currentLevel);
+draw();
+</script>
+</body>
+</html>
